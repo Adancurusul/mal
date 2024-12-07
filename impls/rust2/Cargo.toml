@@ -1,0 +1,13 @@
+[package]
+name = "mal-rust2"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "Make-A-Lisp (mal) implementation in Rust with macros"
+
+[lib]
+path = "types.rs"
+
+[[bin]]
+name = "step0_repl"
+path = "step0_repl.rs"
