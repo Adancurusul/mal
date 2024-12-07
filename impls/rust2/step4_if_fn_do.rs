@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::rc::Rc;
 use std::cell::RefCell;
-use mal_rust2::{MalType, mal, env_new, env_bind, Env, is_type, get_value, ensure_type, apply_fn, ensure};
+use mal_rust2::{MalType, mal, env_new, env_bind, Env, is_type, get_value, apply_fn, ensure};
 
 // Import modules
 mod reader;

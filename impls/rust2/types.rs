@@ -20,6 +20,7 @@ pub enum MalType {
         env: Rc<RefCell<env::Env>>,
         is_macro: bool,
     },
+    TcoForm(Box<MalType>, Rc<RefCell<env::Env>>),
 }
 
 impl PartialEq for MalType {
@@ -37,6 +38,7 @@ impl PartialEq for MalType {
             (MalType::Vector(a), MalType::List(b)) => a == b,
             (MalType::Map(a), MalType::Map(b)) => a == b,
             (MalType::Function { .. }, MalType::Function { .. }) => false, // Functions are never equal
+            (MalType::TcoForm(_, _), MalType::TcoForm(_, _)) => false, // TcoForm 也永远不相等
             _ => false,
         }
     }
@@ -220,13 +222,12 @@ impl MalType {
                 format!("{{{}}}", items.join(" "))
             }
             MalType::Function { .. } => "#<function>".to_string(),
+            MalType::TcoForm(_, _) => "#<tco-form>".to_string(),
         }
     }
 }
 
-// Re-export Env for use by other modules
-pub use env::Env;
-
+// Macro for ensure
 #[macro_export]
 macro_rules! ensure {
     ($cond:expr, $msg:expr) => {
@@ -235,3 +236,6 @@ macro_rules! ensure {
         }
     };
 }
+
+// Re-export Env for use by other modules
+pub use env::Env;

@@ -1,5 +1,12 @@
 use crate::MalType;
 
+#[macro_export]
+macro_rules! pr_str {
+    ($exp:expr, $print_readably:expr) => {
+        printer::pr_str($exp, $print_readably)
+    };
+}
+
 // Convert MalType to string representation
 pub fn pr_str(exp: &MalType, print_readably: bool) -> String {
     match exp {
@@ -38,5 +45,6 @@ pub fn pr_str(exp: &MalType, print_readably: bool) -> String {
             format!("{{{}}}", items.join(" "))
         }
         MalType::Function { .. } => "#<function>".to_string(),
+        MalType::TcoForm(..) => "#<tco>".to_string(),
     }
 } 
