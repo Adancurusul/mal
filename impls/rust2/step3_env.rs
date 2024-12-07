@@ -64,14 +64,55 @@ macro_rules! apply_builtin {
             _ => Err(concat!($name, " requires number arguments").to_string()),
         }
     }};
-    ($name:expr, $args:expr, /) => {{
-        ensure!($args.len() == 2, concat!($name, " requires exactly 2 arguments"));
-        match (&$args[0], &$args[1]) {
-            (MalType::Number(a), MalType::Number(b)) => {
-                ensure!(*b != 0, "division by zero");
-                Ok(mal!(op: *a, /, *b))
-            },
-            _ => Err(concat!($name, " requires number arguments").to_string()),
+}
+
+// Macro for special form handling
+#[macro_export]
+macro_rules! handle_special {
+    ($ast:expr, $env:expr, def!) => {{
+        if $ast.len() != 3 {
+            Err("def! requires exactly 2 arguments".to_string())
+        } else if let MalType::Symbol(key) = &$ast[1] {
+            match eval(&$ast[2], $env) {
+                Ok(value) => {
+                    $env.borrow_mut().set(key, value.clone());
+                    Ok(value)
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            Err("def! first argument must be a symbol".to_string())
+        }
+    }};
+    ($ast:expr, $env:expr, let*) => {{
+        if $ast.len() != 3 {
+            Err("let* requires exactly 2 arguments".to_string())
+        } else {
+            let new_env = env_new!(Some($env.clone()));
+            
+            match &$ast[1] {
+                MalType::List(bindings) | MalType::Vector(bindings) => {
+                    if bindings.len() % 2 != 0 {
+                        Err("let* requires an even number of binding forms".to_string())
+                    } else {
+                        for chunk in bindings.chunks(2) {
+                            if let MalType::Symbol(key) = &chunk[0] {
+                                match eval(&chunk[1], &new_env) {
+                                    Ok(value) => {
+                                        new_env.borrow_mut().set(key, value);
+                                    }
+                                    Err(e) => return Err(e),
+                                }
+                            } else {
+                                return Err("let* binding key must be a symbol".to_string());
+                            }
+                        }
+                        
+                        eval(&$ast[2], &new_env)
+                    }
+                }
+                _ => Err("let* first argument must be a list or vector".to_string()),
+            }
         }
     }};
 }
@@ -147,58 +188,30 @@ fn apply_function(f: &str, args: &[MalType]) -> Result<MalType, String> {
 }
 
 // Handle special forms (def! and let*)
-fn handle_special_form(ast: &[MalType], env: &Rc<RefCell<Env>>) -> Option<Result<MalType, String>> {
+fn handle_special_form(ast: &[MalType], env: &Rc<RefCell<Env>>) -> Result<MalType, String> {
     if let Some(MalType::Symbol(sym)) = ast.first() {
         match sym.as_str() {
-            "def!" => {
-                if ast.len() != 3 {
-                    return Some(Err("def! requires exactly 2 arguments".to_string()));
-                }
-                if let MalType::Symbol(key) = &ast[1] {
-                    match eval(&ast[2], env) {
-                        Ok(value) => {
-                            env.borrow_mut().set(key, value.clone());
-                            return Some(Ok(value));
-                        }
-                        Err(e) => return Some(Err(e)),
+            "def!" => handle_special!(ast, env, def!),
+            "let*" => handle_special!(ast, env, let*),
+            _ => {
+                let evaluated = eval_ast(&MalType::List(ast.to_vec()), env)?;
+                if let MalType::List(items) = evaluated {
+                    if items.is_empty() {
+                        return Ok(MalType::List(vec![]));
                     }
-                }
-                return Some(Err("def! first argument must be a symbol".to_string()));
-            }
-            "let*" => {
-                if ast.len() != 3 {
-                    return Some(Err("let* requires exactly 2 arguments".to_string()));
-                }
-                let new_env = env_new!(Some(env.clone()));
-                
-                match &ast[1] {
-                    MalType::List(bindings) | MalType::Vector(bindings) => {
-                        if bindings.len() % 2 != 0 {
-                            return Some(Err("let* requires an even number of binding forms".to_string()));
-                        }
-                        
-                        for chunk in bindings.chunks(2) {
-                            if let MalType::Symbol(key) = &chunk[0] {
-                                match eval(&chunk[1], &new_env) {
-                                    Ok(value) => {
-                                        new_env.borrow_mut().set(key, value);
-                                    }
-                                    Err(e) => return Some(Err(e)),
-                                }
-                            } else {
-                                return Some(Err("let* binding key must be a symbol".to_string()));
-                            }
-                        }
-                        
-                        return Some(eval(&ast[2], &new_env));
+                    let f = &items[0];
+                    let args = &items[1..];
+                    match f {
+                        MalType::Symbol(s) => apply_function(s, args),
+                        _ => Err("first element must be a function".to_string()),
                     }
-                    _ => return Some(Err("let* first argument must be a list or vector".to_string())),
+                } else {
+                    Ok(evaluated)
                 }
             }
-            _ => None,
         }
     } else {
-        None
+        eval_ast(&MalType::List(ast.to_vec()), env)
     }
 }
 
@@ -217,25 +230,7 @@ fn eval(ast: &MalType, env: &Rc<RefCell<Env>>) -> Result<MalType, String> {
     let result = match ast {
         MalType::List(items) if !items.is_empty() => {
             // Check for special forms first
-            if let Some(result) = handle_special_form(items, env) {
-                result
-            } else {
-                // Evaluate the list
-                let evaluated = eval_ast(ast, env)?;
-                if let MalType::List(items) = evaluated {
-                    // Get the function and arguments
-                    let f = &items[0];
-                    let args = &items[1..];
-                    
-                    // Apply the function
-                    match f {
-                        MalType::Symbol(s) => apply_function(s, args),
-                        _ => Err("first element must be a function".to_string()),
-                    }
-                } else {
-                    Ok(evaluated)
-                }
-            }
+            handle_special_form(items, env)
         }
         _ => eval_ast(ast, env),
     };
