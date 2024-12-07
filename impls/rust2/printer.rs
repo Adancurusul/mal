@@ -37,5 +37,6 @@ pub fn pr_str(exp: &MalType, print_readably: bool) -> String {
                 .collect();
             format!("{{{}}}", items.join(" "))
         }
+        MalType::Function { .. } => "#<function>".to_string(),
     }
 } 

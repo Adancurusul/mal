@@ -2,12 +2,13 @@ STEP0_BIN = target/debug/step0_repl
 STEP1_BIN = target/debug/step1_read_print
 STEP2_BIN = target/debug/step2_eval
 STEP3_BIN = target/debug/step3_env
+STEP4_BIN = target/debug/step4_if_fn_do
 
-.PHONY: all test step0 step1 step2 step3 clean
+.PHONY: all test step0 step1 step2 step3 step4 clean
 
-all: $(STEP0_BIN) $(STEP1_BIN) $(STEP2_BIN) $(STEP3_BIN)
+all: $(STEP0_BIN) $(STEP1_BIN) $(STEP2_BIN) $(STEP3_BIN) $(STEP4_BIN)
 
-$(STEP0_BIN) $(STEP1_BIN) $(STEP2_BIN) $(STEP3_BIN):
+$(STEP0_BIN) $(STEP1_BIN) $(STEP2_BIN) $(STEP3_BIN) $(STEP4_BIN):
 	cargo build
 
 step0: $(STEP0_BIN)
@@ -26,7 +27,11 @@ step3: $(STEP3_BIN)
 	cargo build
 	STEP=step3_env python3 ../../runtest.py ../../tests/step3_env.mal ./run
 
+step4: $(STEP4_BIN)
+	cargo build
+	STEP=step4_if_fn_do python3 ../../runtest.py ../../tests/step4_if_fn_do.mal ./run
+
 clean:
 	cargo clean
 
-test: step0 step1 step2 step3 
+test: step0 step1 step2 step3 step4 

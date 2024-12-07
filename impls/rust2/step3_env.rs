@@ -1,13 +1,11 @@
 use std::io::{self, Write};
 use std::rc::Rc;
 use std::cell::RefCell;
-use mal_rust2::{MalType, mal};
+use mal_rust2::{MalType, mal, env_new, env_bind, Env};
 
 // Import modules
 mod reader;
 mod printer;
-mod env;
-use env::Env;
 
 // Macro for printing the prompt and flushing stdout
 #[macro_export]
@@ -117,27 +115,6 @@ macro_rules! handle_special {
     }};
 }
 
-// Macro for creating a new environment
-#[macro_export]
-macro_rules! env_new {
-    ($outer:expr) => {
-        Rc::new(RefCell::new(Env::new($outer)))
-    };
-    () => {
-        env_new!(None)
-    };
-}
-
-// Macro for setting multiple bindings in an environment
-#[macro_export]
-macro_rules! env_bind {
-    ($env:expr, $($key:expr => $val:expr),* $(,)?) => {{
-        $(
-            $env.borrow_mut().set($key, $val);
-        )*
-    }};
-}
-
 // READ: Parse the input string into an internal data structure
 fn read(input: &str) -> Result<MalType, String> {
     reader::read_str(input)
@@ -187,7 +164,7 @@ fn apply_function(f: &str, args: &[MalType]) -> Result<MalType, String> {
     }
 }
 
-// Handle special forms (def! and let*)
+// Handle special forms
 fn handle_special_form(ast: &[MalType], env: &Rc<RefCell<Env>>) -> Result<MalType, String> {
     if let Some(MalType::Symbol(sym)) = ast.first() {
         match sym.as_str() {
@@ -229,7 +206,6 @@ fn eval(ast: &MalType, env: &Rc<RefCell<Env>>) -> Result<MalType, String> {
 
     let result = match ast {
         MalType::List(items) if !items.is_empty() => {
-            // Check for special forms first
             handle_special_form(items, env)
         }
         _ => eval_ast(ast, env),

@@ -60,4 +60,25 @@ impl Env {
             None
         }
     }
+}
+
+// Macro for creating a new environment
+#[macro_export]
+macro_rules! env_new {
+    ($outer:expr) => {
+        Rc::new(RefCell::new(Env::new($outer)))
+    };
+    () => {
+        env_new!(None)
+    };
+}
+
+// Macro for setting multiple bindings in an environment
+#[macro_export]
+macro_rules! env_bind {
+    ($env:expr, $($key:expr => $val:expr),* $(,)?) => {{
+        $(
+            $env.borrow_mut().set($key, $val);
+        )*
+    }};
 } 
