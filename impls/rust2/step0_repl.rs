@@ -20,30 +20,29 @@ macro_rules! read_input {
     }};
 }
 
-// Macro for the READ-EVAL-PRINT cycle
-// Takes an expression and returns its evaluated result
-#[macro_export]
-macro_rules! rep {
-    ($input:expr) => {{
-        let ast = read($input);    // READ phase
-        let exp = eval(&ast);      // EVAL phase
-        print(&exp)                // PRINT phase
-    }};
-}
-
-// READ: Parse the input string into an internal data structure
+// READ: Return input string unchanged
 fn read(input: &str) -> MalType {
-    mal!(str: input)
+    mal!(str: input.to_string())
 }
 
-// EVAL: Evaluate the internal data structure
+// EVAL: Return input string unchanged
 fn eval(ast: &MalType) -> MalType {
     ast.clone()
 }
 
-// PRINT: Convert the evaluated result back to a string
+// PRINT: Return input string unchanged
 fn print(exp: &MalType) -> String {
     exp.print()
+}
+
+// Macro for the READ-EVAL-PRINT cycle
+#[macro_export]
+macro_rules! rep {
+    ($input:expr) => {{
+        let ast = read($input);
+        let exp = eval(&ast);
+        print(&exp)
+    }};
 }
 
 fn main() {
