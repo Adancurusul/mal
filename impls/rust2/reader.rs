@@ -1,6 +1,8 @@
-use crate::{MalType, mal};
+use std::iter::Peekable;
+use std::str::Chars;
+use crate::MalType;
+use crate::mal;
 
-// Token types for lexical analysis
 #[derive(Debug, Clone)]
 enum Token {
     LeftParen,
@@ -14,108 +16,34 @@ enum Token {
     Unquote,
     SpliceUnquote,
     Deref,
-    Meta,
+    WithMeta,
+    String(String),
     Number(i64),
     Symbol(String),
-    String(String),
     Keyword(String),
+    Bool(bool),
+    Nil,
 }
 
-// Reader structure to keep track of tokens and current position
-struct Reader {
-    tokens: Vec<Token>,
-    position: usize,
-}
-
-impl Reader {
-    fn new(tokens: Vec<Token>) -> Self {
-        Reader {
-            tokens,
-            position: 0,
-        }
-    }
-
-    fn next(&mut self) -> Option<Token> {
-        if self.position < self.tokens.len() {
-            let token = self.tokens[self.position].clone();
-            self.position += 1;
-            Some(token)
-        } else {
-            None
-        }
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        if self.position < self.tokens.len() {
-            Some(&self.tokens[self.position])
-        } else {
-            None
-        }
-    }
-}
-
-// Read a string, handling escape sequences
-fn read_string(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<String, String> {
-    let mut result = String::new();
-    
-    while let Some(&c) = chars.peek() {
-        match c {
-            '"' => {
-                chars.next(); // consume closing quote
-                return Ok(result);
-            }
-            '\\' => {
-                chars.next(); // consume backslash
-                match chars.next() {
-                    Some('n') => result.push('\n'),
-                    Some('\\') => result.push('\\'),
-                    Some('"') => result.push('"'),
-                    Some(c) => result.push(c),
-                    None => return Err("end of input".to_string()),
-                }
-            }
-            _ => {
-                result.push(chars.next().unwrap());
-            }
-        }
-    }
-    Err("end of input".to_string())
-}
-
-// Skip to the end of line
-fn skip_comment(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while let Some(&c) = chars.peek() {
-        if c == '\n' {
-            break;
-        }
-        chars.next();
-    }
-}
-
-// Tokenize input string into a vector of tokens
 fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
     while let Some(&c) = chars.peek() {
         match c {
-            // Skip whitespace and commas (commas are treated as whitespace)
-            c if c.is_whitespace() || c == ',' => {
+            // Skip whitespace
+            c if c.is_whitespace() => {
                 chars.next();
             }
-            // Handle comments
+            // Skip comments
             ';' => {
-                skip_comment(&mut chars);
-            }
-            // Handle strings
-            '"' => {
-                chars.next(); // consume opening quote
-                match read_string(&mut chars) {
-                    Ok(s) => tokens.push(Token::String(s)),
-                    Err(e) => return Err(e),
+                while let Some(c) = chars.next() {
+                    if c == '\n' {
+                        break;
+                    }
                 }
             }
-            // Handle special characters
+            // Special characters
             '(' => {
                 tokens.push(Token::LeftParen);
                 chars.next();
@@ -162,183 +90,175 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 chars.next();
             }
             '^' => {
-                tokens.push(Token::Meta);
+                tokens.push(Token::WithMeta);
                 chars.next();
             }
-            // Handle keywords
+            '"' => {
+                chars.next(); // Skip opening quote
+                let mut string = String::new();
+                let mut escaped = false;
+
+                while let Some(c) = chars.next() {
+                    if escaped {
+                        match c {
+                            'n' => string.push('\n'),
+                            't' => string.push('\t'),
+                            '\\' => string.push('\\'),
+                            '"' => string.push('"'),
+                            _ => return Err(format!("Invalid escape sequence: \\{}", c)),
+                        }
+                        escaped = false;
+                    } else if c == '\\' {
+                        escaped = true;
+                    } else if c == '"' {
+                        tokens.push(Token::String(string));
+                        break;
+                    } else {
+                        string.push(c);
+                    }
+                }
+
+                if escaped {
+                    return Err("String ended while parsing escape sequence".to_string());
+                }
+            }
             ':' => {
-                chars.next(); // consume colon
+                chars.next(); // Skip colon
                 let mut keyword = String::new();
                 while let Some(&c) = chars.peek() {
-                    if c.is_alphanumeric() || "+-*/<>=!?_-".contains(c) {
-                        keyword.push(chars.next().unwrap());
+                    if c.is_alphanumeric() || c == '_' || c == '-' {
+                        keyword.push(c);
+                        chars.next();
                     } else {
                         break;
                     }
                 }
                 tokens.push(Token::Keyword(keyword));
             }
-            // Handle numbers
+            // Numbers
             c if c.is_digit(10) || (c == '-' && chars.clone().nth(1).map_or(false, |next| next.is_digit(10))) => {
                 let mut number = String::new();
                 if c == '-' {
-                    number.push(chars.next().unwrap());
+                    number.push(c);
+                    chars.next();
                 }
                 while let Some(&c) = chars.peek() {
                     if c.is_digit(10) {
-                        number.push(chars.next().unwrap());
+                        number.push(c);
+                        chars.next();
                     } else {
                         break;
                     }
                 }
-                if let Ok(n) = number.parse() {
-                    tokens.push(Token::Number(n));
+                match number.parse() {
+                    Ok(n) => tokens.push(Token::Number(n)),
+                    Err(_) => return Err(format!("Invalid number: {}", number)),
                 }
             }
-            // Handle symbols
-            c if c.is_alphabetic() || "+-*/<>=!?_".contains(c) => {
+            // Symbols and special values
+            c if c.is_alphabetic() || "+-/*_<>=!?".contains(c) => {
                 let mut symbol = String::new();
                 while let Some(&c) = chars.peek() {
-                    if c.is_alphanumeric() || "+-*/<>=!?_-:".contains(c) {
-                        symbol.push(chars.next().unwrap());
+                    if c.is_alphanumeric() || "+-/*_<>=!?".contains(c) {
+                        symbol.push(c);
+                        chars.next();
                     } else {
                         break;
                     }
                 }
-                tokens.push(Token::Symbol(symbol));
+                match symbol.as_str() {
+                    "nil" => tokens.push(Token::Nil),
+                    "true" => tokens.push(Token::Bool(true)),
+                    "false" => tokens.push(Token::Bool(false)),
+                    _ => tokens.push(Token::Symbol(symbol)),
+                }
             }
-            // Skip unknown characters
-            _ => {
-                chars.next();
-            }
+            _ => return Err(format!("Unexpected character: {}", c)),
         }
     }
+
     Ok(tokens)
 }
 
-// Read an atom (number, symbol, string, or keyword)
-fn read_atom(token: Token) -> Result<MalType, String> {
-    match token {
-        Token::Number(n) => Ok(mal!(n)),
-        Token::Symbol(s) => Ok(mal!(sym: s)),
-        Token::String(s) => Ok(mal!(str: s)),
-        Token::Keyword(k) => Ok(mal!(kw: k)),
+fn read_form(tokens: &mut Peekable<std::slice::Iter<Token>>) -> Result<MalType, String> {
+    match tokens.peek() {
+        Some(Token::LeftParen) => read_list(tokens),
+        Some(Token::LeftBracket) => read_vector(tokens),
+        Some(Token::LeftBrace) => read_map(tokens),
+        Some(_) => read_atom(tokens),
+        None => Err("Unexpected end of input".to_string()),
+    }
+}
+
+fn read_list(tokens: &mut Peekable<std::slice::Iter<Token>>) -> Result<MalType, String> {
+    tokens.next(); // Skip left paren
+    let mut items = Vec::new();
+    
+    while let Some(token) = tokens.peek() {
+        if let Token::RightParen = token {
+            tokens.next();
+            return Ok(MalType::List(items));
+        }
+        items.push(read_form(tokens)?);
+    }
+    
+    Err("Expected closing parenthesis".to_string())
+}
+
+fn read_vector(tokens: &mut Peekable<std::slice::Iter<Token>>) -> Result<MalType, String> {
+    tokens.next(); // Skip left bracket
+    let mut items = Vec::new();
+    
+    while let Some(token) = tokens.peek() {
+        if let Token::RightBracket = token {
+            tokens.next();
+            return Ok(MalType::Vector(items));
+        }
+        items.push(read_form(tokens)?);
+    }
+    
+    Err("Expected closing bracket".to_string())
+}
+
+fn read_map(tokens: &mut Peekable<std::slice::Iter<Token>>) -> Result<MalType, String> {
+    tokens.next(); // Skip left brace
+    let mut pairs = Vec::new();
+    
+    while let Some(token) = tokens.peek() {
+        if let Token::RightBrace = token {
+            tokens.next();
+            return Ok(MalType::Map(pairs));
+        }
+        let key = read_form(tokens)?;
+        let value = read_form(tokens)?;
+        pairs.push((key, value));
+    }
+    
+    Err("Expected closing brace".to_string())
+}
+
+fn read_atom(tokens: &mut Peekable<std::slice::Iter<Token>>) -> Result<MalType, String> {
+    match tokens.next() {
+        Some(Token::Nil) => Ok(mal!(nil)),
+        Some(Token::Bool(b)) => Ok(mal!(bool: *b)),
+        Some(Token::Number(n)) => Ok(mal!(*n)),
+        Some(Token::String(s)) => Ok(mal!(str: s.clone())),
+        Some(Token::Symbol(s)) => Ok(mal!(sym: s.clone())),
+        Some(Token::Keyword(k)) => Ok(mal!(key: k.clone())),
         _ => Err("Invalid atom".to_string()),
     }
 }
 
-// Read a list
-fn read_list(reader: &mut Reader) -> Result<MalType, String> {
-    let mut items = Vec::new();
-    
-    loop {
-        match reader.peek() {
-            Some(&Token::RightParen) => {
-                reader.next();
-                return Ok(MalType::List(items));
-            }
-            Some(_) => {
-                items.push(read_form(reader)?);
-            }
-            None => {
-                return Err("end of input".to_string());
-            }
-        }
-    }
-}
-
-// Read a vector
-fn read_vector(reader: &mut Reader) -> Result<MalType, String> {
-    let mut items = Vec::new();
-    
-    loop {
-        match reader.peek() {
-            Some(&Token::RightBracket) => {
-                reader.next();
-                return Ok(MalType::Vector(items));
-            }
-            Some(_) => {
-                items.push(read_form(reader)?);
-            }
-            None => {
-                return Err("end of input".to_string());
-            }
-        }
-    }
-}
-
-// Read a hash map
-fn read_hash_map(reader: &mut Reader) -> Result<MalType, String> {
-    let mut pairs = Vec::new();
-    
-    loop {
-        match reader.peek() {
-            Some(&Token::RightBrace) => {
-                reader.next();
-                return Ok(MalType::Map(pairs));
-            }
-            Some(_) => {
-                let key = read_form(reader)?;
-                match reader.peek() {
-                    Some(_) => {
-                        let value = read_form(reader)?;
-                        pairs.push((key, value));
-                    }
-                    None => {
-                        return Err("end of input".to_string());
-                    }
-                }
-            }
-            None => {
-                return Err("end of input".to_string());
-            }
-        }
-    }
-}
-
-// Read any form
-fn read_form(reader: &mut Reader) -> Result<MalType, String> {
-    match reader.next() {
-        Some(Token::Quote) => {
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "quote"), form))
-        }
-        Some(Token::Quasiquote) => {
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "quasiquote"), form))
-        }
-        Some(Token::Unquote) => {
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "unquote"), form))
-        }
-        Some(Token::SpliceUnquote) => {
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "splice-unquote"), form))
-        }
-        Some(Token::Deref) => {
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "deref"), form))
-        }
-        Some(Token::Meta) => {
-            let meta = read_form(reader)?;
-            let form = read_form(reader)?;
-            Ok(mal!(list: mal!(sym: "with-meta"), form, meta))
-        }
-        Some(Token::LeftParen) => read_list(reader),
-        Some(Token::LeftBracket) => read_vector(reader),
-        Some(Token::LeftBrace) => read_hash_map(reader),
-        Some(token) => read_atom(token),
-        None => Err("end of input".to_string()),
-    }
-}
-
-// Main entry point for the reader
 pub fn read_str(input: &str) -> Result<MalType, String> {
-    let tokens = tokenize(input)?;
-    if tokens.is_empty() {
+    if input.trim().is_empty() {
         return Err("Empty input".to_string());
     }
     
-    let mut reader = Reader::new(tokens);
-    read_form(&mut reader)
+    let tokens = tokenize(input)?;
+    if tokens.is_empty() {
+        return Err("No valid tokens".to_string());
+    }
+    
+    let mut token_iter = tokens.iter().peekable();
+    read_form(&mut token_iter)
 } 
